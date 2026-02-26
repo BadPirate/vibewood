@@ -7,11 +7,10 @@ WORKDIR /app
 
 ENV NODE_ENV=development
 
-COPY package.json tsconfig.json ./
+COPY package.json package-lock.json tsconfig.json ./
+RUN npm install
 COPY src ./src
 COPY public ./public
-
-RUN npm install
 RUN npm run build
 
 FROM node:${NODE_VERSION}-alpine AS runtime
@@ -20,7 +19,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000
 
-COPY package.json ./
+COPY package.json package-lock.json ./
 RUN npm install --omit=dev
 
 COPY --from=build /app/dist ./dist

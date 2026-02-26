@@ -2,6 +2,7 @@ import dotenv from "dotenv";
 import express, { Request, Response } from "express";
 import { promises as fs } from "fs";
 import path from "path";
+import { randomUUID } from "crypto";
 import OpenAI from "openai";
 
 dotenv.config();
@@ -16,6 +17,7 @@ const client = new OpenAI({ apiKey });
 
 const app = express();
 const port = process.env.PORT || 3000;
+const defaultModel = process.env.OPENAI_MODEL || "gpt-4.1-mini";
 const publicDir = path.resolve(__dirname, "../public");
 const generatedDir = path.join(publicDir, "generated");
 
@@ -71,7 +73,7 @@ const readHtmlFile = async (relativePath: string): Promise<string> => {
 
 const writeGeneratedHtml = async (htmlContent: string): Promise<string> => {
   await ensureGeneratedDir();
-  const filename = `generated/page-${Date.now()}.html`;
+  const filename = `generated/page-${Date.now()}-${randomUUID()}.html`;
   const fullPath = path.join(publicDir, filename);
   await fs.writeFile(fullPath, htmlContent, "utf-8");
   return filename;
@@ -84,25 +86,30 @@ app.post("/api/create", async (req: Request<unknown, unknown, CreateRequestBody>
     return res.status(400).json({ error: "Prompt is required." });
   }
 
-  let currentPagePath: string;
+  let currentPagePath: string | null = null;
 
   try {
-    currentPagePath = extractRelativePage(currentPage);
+    if (typeof currentPage === "string" && currentPage.trim() !== "") {
+      currentPagePath = extractRelativePage(currentPage);
+    }
   } catch (error) {
     return res.status(400).json({ error: "Invalid current page provided." });
   }
 
   try {
-    const currentHtml = await readHtmlFile(currentPagePath);
+    const isGeneratedPage = !!currentPagePath && currentPagePath.startsWith("generated/");
+    const currentHtml = isGeneratedPage && currentPagePath ? await readHtmlFile(currentPagePath) : "";
+    const documentLabel = isGeneratedPage && currentPagePath ? currentPagePath : "new-document.html";
 
     const systemPrompt =
-      "You update HTML documents in response to high-level requests. " +
-      "Return a complete, valid HTML document tailored to the user's request. " +
-      "Preserve existing helpful structure when appropriate.";
+      "You are VibeForge, an autonomous web development agent with access to web search. " +
+      "When given a current HTML document and a request, research as needed, then rewrite the document. " +
+      "Think like a Cursor-style coding assistant: plan the changes, apply them precisely, and return the finished file. " +
+      "Your response MUST be a single self-contained HTML document starting with <!DOCTYPE html>. " +
+      "Do not include Markdown, backticks, or commentary—only the HTML.";
 
-    const requestInput =
-      `${systemPrompt}\n\n` +
-      `Current document (${currentPagePath}):\n` +
+    const userPrompt =
+      `Current document (${documentLabel}):\n` +
       "--------------------\n" +
       (currentHtml || "(empty)") +
       "\n--------------------\n\n" +
@@ -110,14 +117,41 @@ app.post("/api/create", async (req: Request<unknown, unknown, CreateRequestBody>
       "Return only the updated HTML document.";
 
     const response = await client.responses.create({
-      model: "gpt-4.1-mini",
-      input: requestInput,
+      model: defaultModel,
+      input: [
+        {
+          role: "system",
+          content: [
+            {
+              type: "input_text",
+              text: systemPrompt,
+            },
+          ],
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: userPrompt,
+            },
+          ],
+        },
+      ],
     });
 
     const outputHtml = response.output_text?.trim();
 
     if (!outputHtml) {
       return res.status(502).json({ error: "No HTML content returned from model." });
+    }
+
+    if (!/^<!DOCTYPE html>/i.test(outputHtml) || !outputHtml.toLowerCase().includes("<html")) {
+      return res.status(502).json({ error: "Model response was not a complete HTML document." });
+    }
+
+    if (outputHtml.includes("```")) {
+      return res.status(502).json({ error: "Model response contained Markdown fences, which are not allowed." });
     }
 
     const filename = await writeGeneratedHtml(outputHtml);

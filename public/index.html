@@ -99,9 +99,126 @@
         font-size: 0.95rem;
         color: rgba(148, 163, 184, 0.8);
       }
+
+      #loadingOverlay {
+        position: fixed;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        background: radial-gradient(circle at top, rgba(15, 23, 42, 0.88), rgba(15, 23, 42, 0.98));
+        backdrop-filter: blur(22px);
+        z-index: 1000;
+        transition: opacity 0.25s ease;
+      }
+
+      #loadingOverlay[hidden] {
+        display: none;
+      }
+
+      .loading-card {
+        position: relative;
+        padding: 2.75rem 3.25rem;
+        border-radius: 28px;
+        background: rgba(15, 23, 42, 0.65);
+        border: 1px solid rgba(99, 102, 241, 0.25);
+        box-shadow: 0 30px 80px rgba(79, 70, 229, 0.35);
+        overflow: hidden;
+      }
+
+      .loading-card::before,
+      .loading-card::after {
+        content: "";
+        position: absolute;
+        inset: -120%;
+        background: conic-gradient(from 0deg, rgba(56, 189, 248, 0.65), rgba(14, 165, 233, 0.2), rgba(79, 70, 229, 0.7), rgba(109, 40, 217, 0.3), rgba(56, 189, 248, 0.65));
+        animation: spin 8s linear infinite;
+        opacity: 0.75;
+      }
+
+      .loading-card::after {
+        animation-direction: reverse;
+        opacity: 0.45;
+      }
+
+      .loading-content {
+        position: relative;
+        display: grid;
+        gap: 1rem;
+        text-align: center;
+        color: #e2e8f0;
+      }
+
+      .loading-orbs {
+        display: flex;
+        justify-content: center;
+        gap: 1.5rem;
+      }
+
+      .loading-orb {
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, #38bdf8, #6366f1);
+        animation: float 1.6s ease-in-out infinite;
+      }
+
+      .loading-orb:nth-child(2) {
+        animation-delay: 0.22s;
+      }
+
+      .loading-orb:nth-child(3) {
+        animation-delay: 0.44s;
+      }
+
+      .loading-title {
+        font-size: 1.35rem;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+      }
+
+      .loading-detail {
+        color: rgba(226, 232, 240, 0.78);
+        font-size: 0.95rem;
+        line-height: 1.6;
+        max-width: 360px;
+        margin: 0 auto;
+      }
+
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      @keyframes float {
+        0%,
+        100% {
+          transform: translateY(0);
+          opacity: 0.6;
+        }
+        50% {
+          transform: translateY(-8px);
+          opacity: 1;
+        }
+      }
     </style>
   </head>
   <body>
+    <div id="loadingOverlay" hidden>
+      <div class="loading-card">
+        <div class="loading-content">
+          <div class="loading-orbs">
+            <span class="loading-orb"></span>
+            <span class="loading-orb"></span>
+            <span class="loading-orb"></span>
+          </div>
+          <div class="loading-title">Shaping your vibe</div>
+          <p id="loadingDetail" class="loading-detail">
+            Summoning agents, remixing pixels, and rendering your atmosphere.
+          </p>
+        </div>
+      </div>
+    </div>
     <main>
       <iframe id="preview" title="Vibe coding preview" src="playground.html"></iframe>
       <section class="controls">
@@ -119,8 +236,11 @@
       const createButton = document.getElementById("createButton");
       const backButton = document.getElementById("backButton");
       const status = document.getElementById("status");
+      const loadingOverlay = document.getElementById("loadingOverlay");
+      const loadingDetail = document.getElementById("loadingDetail");
 
       const historyStack = [];
+      let isFirstPrompt = true;
 
       const getRelativePath = (url) => {
         if (!url) return "playground.html";
@@ -137,11 +257,26 @@
         status.style.color = isError ? "#f87171" : "rgba(148, 163, 184, 0.8)";
       };
 
-      const toggleBusy = (busy) => {
+      const toggleBusy = (busy, promptMessage = "") => {
         createButton.disabled = busy;
         promptInput.disabled = busy;
         if (busy) {
           setStatus("Creating new vibe…");
+          loadingOverlay.hidden = false;
+          loadingOverlay.style.opacity = "1";
+          if (promptMessage) {
+            loadingDetail.textContent = `Prompt: “${promptMessage}”`;
+          } else {
+            loadingDetail.textContent =
+              "Summoning agents, remixing pixels, and rendering your atmosphere.";
+          }
+        } else {
+          loadingOverlay.style.opacity = "0";
+          setTimeout(() => {
+            loadingOverlay.hidden = true;
+            loadingDetail.textContent =
+              "Summoning agents, remixing pixels, and rendering your atmosphere.";
+          }, 200);
         }
       };
 
@@ -159,7 +294,7 @@
 
         const currentSrc = getRelativePath(iframe.src);
 
-        toggleBusy(true);
+        toggleBusy(true, prompt);
         setStatus("");
 
         try {
@@ -170,7 +305,7 @@
             },
             body: JSON.stringify({
               prompt,
-              currentPage: iframe.src,
+              currentPage: isFirstPrompt ? null : iframe.src,
             }),
           });
 
@@ -191,6 +326,7 @@
           const newSrc = data.filename.startsWith("/") ? data.filename : `/${data.filename}`;
           iframe.src = newSrc;
           setStatus("New vibe created!");
+          isFirstPrompt = false;
         } catch (error) {
           setStatus(error.message || "Something went wrong.", true);
         } finally {
